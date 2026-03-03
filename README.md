@@ -1,4 +1,4 @@
-## XYLON Portfolio · Deep Sea R3F Template
+## Deep Sea R3F Template
 
 一个面向作品集与品牌展示的深海主题模板（Vite + React + TypeScript + Tailwind CSS v4 + Three.js/React Three Fiber）。
 核心包含两大可复用能力：
