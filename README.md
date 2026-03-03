@@ -1,4 +1,4 @@
-## XYLON Portfolio · Deep Sea R3F Template
+## Deep Sea R3F Template
 
 一个面向作品集与品牌展示的深海主题模板（Vite + React + TypeScript + Tailwind CSS v4 + Three.js/React Three Fiber）。
 核心包含两大可复用能力：
@@ -15,15 +15,6 @@
 - 通透视觉：玻璃态导航、渐变光影背景、细腻的滚动与悬停微交互；CSS 全局平滑滚动并尊重系统“减少动态”。
 - 架构韧性：WebGL2 支持检测；WebGL Context 丢失/恢复事件处理与可视化提示；Canvas 与 DOM 高频数据隔离。
 - 响应式与可访问性：移动端粒子数量自适应、DPR 上限控制、Reduced Motion 支持、键盘可访问性完善。
-
-### 近期优化摘要（已合并）
-- 渲染循环净空：去除循环内临时对象创建，统一使用模块级临时向量与 for 循环，避免 GC 抖动（见 [Boids.tsx](file:///f:/git/aicode/xylon-portfolio/src/components/ThreeBackground/Boids.tsx)）。
-- 渲染纯度：Boids 初始化与实例配色使用确定性 PRNG，保证在同一参数下结果可复现；`uTime` 仅通过材质 ref 更新（见 [Boids.tsx](file:///f:/git/aicode/xylon-portfolio/src/components/ThreeBackground/Boids.tsx)）。
-- GPU 粒子：初始化随机改为轻量 xorshift32；背景平面缩放计算增加缓存，仅在相机参数变更时重算（见 [DeepSeaBackground.tsx](file:///f:/git/aicode/xylon-portfolio/src/components/ThreeBackground/DeepSeaBackground.tsx)）。
-- 着色器：用连乘/平方根替代部分 `pow`，在不改视觉的前提下降低 ALU 压力（见 [shaders.ts](file:///f:/git/aicode/xylon-portfolio/src/components/ThreeBackground/shaders.ts)）。
-- DOM 动画：SmoothScroll 与 CustomCursor 改为“按需 RAF + 停止条件”，并使用 `passive: true` 的滚动监听（见 [App.tsx](file:///f:/git/aicode/xylon-portfolio/src/App.tsx)）。
-- 韧性与降级：增加 WebGL2 检测与 WebGL Context 丢失/恢复提示（见 [ThreeBackground/index.tsx](file:///f:/git/aicode/xylon-portfolio/src/components/ThreeBackground/index.tsx)）。
-
 
 ## 快速开始
 
