@@ -266,7 +266,7 @@ const Navbar = () => {
       </div>
 
       {isOpen && (
-        <div className="fixed inset-0 bg-[#020813]/70 backdrop-blur-2xl flex flex-col items-center justify-center gap-10 text-3xl font-black z-40">
+        <div className="fixed inset-0 bg-[#03111d]/52 backdrop-blur-xl flex flex-col items-center justify-center gap-10 text-3xl font-black z-40">
           <a href="#about" onClick={() => setIsOpen(false)} className="hover-target hover:text-blue-300 transition-colors tracking-tight">ABOUT</a>
           <a href="#works" onClick={() => setIsOpen(false)} className="hover-target hover:text-blue-300 transition-colors tracking-tight">WORKS</a>
           <a href="#contact" onClick={() => setIsOpen(false)} className="hover-target hover:text-blue-300 transition-colors tracking-tight">CONTACT</a>
@@ -286,12 +286,12 @@ const Hero = () => {
         </div>
 
         <h1 className="mt-7 text-5xl sm:text-7xl md:text-[9rem] lg:text-[10rem] font-black tracking-tighter leading-[0.92] uppercase">
-          <span className="text-white drop-shadow-2xl">Crafting</span>
+          <span className="text-white/92 drop-shadow-2xl">Crafting</span>
           <br />
-          <span className="bg-gradient-to-b from-white via-white to-blue-200/70 text-transparent bg-clip-text drop-shadow-2xl">Dimensions</span>
+          <span className="bg-gradient-to-b from-white/95 via-blue-50/92 to-blue-200/62 text-transparent bg-clip-text drop-shadow-2xl">Dimensions</span>
         </h1>
 
-        <p className="mt-6 text-blue-200/80 text-sm sm:text-lg md:text-xl max-w-xs sm:max-w-2xl mx-auto uppercase tracking-[0.22em] font-light">
+        <p className="mt-6 text-blue-100/68 text-sm sm:text-lg md:text-xl max-w-xs sm:max-w-2xl mx-auto uppercase tracking-[0.22em] font-light">
           数字化设计工作室 · 重新定义人机交互的感官深度
         </p>
 
@@ -399,10 +399,10 @@ const App = () => {
             </div>
           </section>
 
-          <section id="contact" className="py-24 md:py-40 px-6 md:px-8 bg-[#020813]/80 backdrop-blur-3xl border-t border-[#0a1e38]">
+          <section id="contact" className="py-24 md:py-40 px-6 md:px-8 bg-[#041220]/56 backdrop-blur-2xl border-t border-[#123454]/50">
             <div className="max-w-7xl mx-auto text-center">
               <div className="ui-glass ui-shadow-soft rounded-3xl border ui-hairline px-6 md:px-12 py-16 md:py-20">
-                <h2 className="text-7xl md:text-[11rem] font-black tracking-tighter uppercase leading-none mb-14 italic text-white/90">
+                <h2 className="text-7xl md:text-[11rem] font-black tracking-tighter uppercase leading-none mb-14 italic text-white/82">
                   Let's<br /><span className="text-blue-600">Dive.</span>
                 </h2>
                 <div className="flex flex-col items-center gap-8 md:gap-10">

@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { birdVertexShader, birdFragmentShader } from './shaders';
 
+const MAIN_LIGHT_DIRECTION = new THREE.Vector3(0.18, -1.0, -0.08).normalize();
+
 /**
  * 生成确定性伪随机数生成器（PRNG）
  * @param seed 种子（32 位有符号整数）
@@ -50,6 +52,20 @@ type BoidsProps = {
 };
 
 /**
+ * 创建鱼群材质的 uniform 结构
+ * @returns 用于鱼群动画与雾融合的初始 uniform 集合
+ */
+function createBoidUniforms() {
+  return {
+    uTime: { value: 0 },
+    uCameraPos: { value: new THREE.Vector3() },
+    uFogNear: { value: 12 },
+    uFogFar: { value: 48 },
+    uLightDir: { value: MAIN_LIGHT_DIRECTION.clone() },
+  };
+}
+
+/**
  * Boids 群集组件（基于 InstancedMesh）
  * - 支持移动端/横竖屏自适应
  * - 使用确定性 PRNG 初始化，避免渲染期不纯
@@ -94,7 +110,7 @@ const Boids = ({ count, maxSpeed, bounds }: BoidsProps) => {
   }, [BOID_COUNT, BOUNDS, SPEED]);
 
   const colors = useMemo(() => {
-    const premiumPalette = ['#FF7F50', '#FF6B6B', '#FFA07A', '#FF4500', '#F08080'];
+    const premiumPalette = ['#d8ecff', '#c7def5', '#b8d4ef', '#9fc3e6', '#e5f3ff'];
     const colorArray = new Float32Array(BOID_COUNT * 3);
     const _color = new THREE.Color();
     // 与 birds 初始化保持相同的种子，保证实例颜色在相同参数下稳定
@@ -108,7 +124,7 @@ const Boids = ({ count, maxSpeed, bounds }: BoidsProps) => {
     return colorArray;
   }, [BOID_COUNT, BOUNDS, SPEED]);
 
-  const uniforms = useMemo(() => ({ uTime: { value: 0 } }), []);
+  const uniforms = useMemo(() => createBoidUniforms(), []);
 
   useLayoutEffect(() => {
     const mesh = meshRef.current;
@@ -123,9 +139,12 @@ const Boids = ({ count, maxSpeed, bounds }: BoidsProps) => {
 
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock, camera }) => {
     const time = clock.getElapsedTime();
-    if (materialRef.current) materialRef.current.uniforms.uTime.value = time;
+    if (materialRef.current) {
+      materialRef.current.uniforms.uTime.value = time;
+      materialRef.current.uniforms.uCameraPos.value.copy(camera.position);
+    }
 
     const mesh = meshRef.current;
     if (!mesh) return;

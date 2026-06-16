@@ -7,6 +7,7 @@ export const birdVertexShader = `
   varying vec2 vUv;
   varying float vDepth;
   varying vec3 vColor;
+  varying vec3 vWorldPosition;
   
   uniform float uTime;
   
@@ -23,9 +24,11 @@ export const birdVertexShader = `
     }
     
     vec4 instancePosition = instanceMatrix * vec4(pos, 1.0);
+    vec4 worldPosition = modelMatrix * instancePosition;
     vec4 mvPosition = modelViewMatrix * instancePosition;
     
-    vDepth = -mvPosition.z; 
+    vDepth = -mvPosition.z;
+    vWorldPosition = worldPosition.xyz;
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -34,160 +37,215 @@ export const birdFragmentShader = `
   varying vec2 vUv;
   varying float vDepth;
   varying vec3 vColor;
+  varying vec3 vWorldPosition;
+
+  uniform vec3 uCameraPos;
+  uniform float uFogNear;
+  uniform float uFogFar;
+  uniform vec3 uLightDir;
   
   void main() {
-    float fogFactor = smoothstep(15.0, 50.0, vDepth);
-    vec3 bgColor = vec3(0.008, 0.031, 0.075); 
-    
-    vec3 headColor = vColor * 1.5; 
-    vec3 tailColor = mix(vColor * 0.4, bgColor, 0.7);
+    float fogFactor = smoothstep(uFogNear, uFogFar, vDepth);
+    vec3 rayDir = normalize(vWorldPosition - uCameraPos);
+    float viewUp = rayDir.y * 0.5 + 0.5;
+    float lightFacing = max(dot(normalize(-uLightDir), rayDir), 0.0);
+
+    vec3 deepColor = vec3(0.008, 0.031, 0.075);
+    vec3 scatterColor = vec3(0.12, 0.42, 0.82);
+    vec3 waterColor = deepColor + scatterColor * (viewUp * 0.18 + lightFacing * 0.08);
+
+    vec3 headColor = mix(vColor * 1.18, vec3(0.92, 0.97, 1.0), 0.2);
+    vec3 tailColor = mix(vColor * 0.52, waterColor, 0.76);
     vec3 gradientFish = mix(tailColor, headColor, smoothstep(0.0, 1.0, vUv.y));
-    
-    vec3 finalColor = mix(gradientFish, bgColor, fogFactor);
-    float alpha = mix(0.95, 0.0, fogFactor); 
-    
+
+    float upperGlow = smoothstep(-0.2, 0.7, rayDir.y) * 0.13 + lightFacing * 0.1;
+    vec3 foggedColor = waterColor + scatterColor * upperGlow;
+    vec3 finalColor = mix(gradientFish, foggedColor, fogFactor);
+    float alpha = mix(0.96, 0.14, fogFactor);
+
     gl_FragColor = vec4(finalColor, alpha);
   }
 `;
 
 export const bgVertexShader = `
   varying vec2 vUv;
+  varying vec3 vWorldPosition;
+
   void main() {
     vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+    vWorldPosition = worldPosition.xyz;
+    gl_Position = projectionMatrix * viewMatrix * worldPosition;
   }
 `;
 
 export const bgFragmentShader = `
   varying vec2 vUv;
+  varying vec3 vWorldPosition;
+
   uniform float uTime;
-  
+  uniform vec3 uCameraPos;
+  uniform vec2 uResolution;
+  uniform vec3 uLightDir;
+
+  float tri(float value) {
+    return abs(fract(value) - 0.5);
+  }
+
+  vec3 tri3(vec3 value) {
+    return vec3(
+      tri(value.z + tri(value.y * 1.0)),
+      tri(value.z + tri(value.x * 1.0)),
+      tri(value.y + tri(value.x * 1.0))
+    );
+  }
+
+  float triNoise3D(vec3 position, float speed, float timeValue) {
+    vec3 p = position;
+    float z = 1.4;
+    float rz = 0.0;
+    vec3 bp = p;
+
+    for (float i = 0.0; i <= 3.0; i++) {
+      vec3 dg = tri3(bp * 2.0);
+      p += dg + vec3(timeValue * 0.1 * speed);
+      bp *= 1.8;
+      z *= 1.5;
+      p *= 1.2;
+
+      float t = tri(p.z + tri(p.x + tri(p.y)));
+      rz += t / z;
+      bp += vec3(0.14);
+    }
+
+    return rz;
+  }
+
+  vec3 hash23(vec2 uv) {
+    float dt = dot(uv, vec2(12.9898, 78.233));
+    float sn = sin(mod(dt, 3.14159265358979323846));
+    return fract(vec3(43758.5453, 43758.1947, 43758.42037) * sn);
+  }
+
   void main() {
-    vec3 bottomColor = vec3(0.008, 0.031, 0.075); 
-    vec3 topColor = vec3(0.04, 0.25, 0.4);
-    // 优化 pow(vUv.y, 1.5) => vUv.y * sqrt(vUv.y)
-    vec3 color = mix(bottomColor, topColor, vUv.y * sqrt(vUv.y)); 
-    
-    vec2 sunPos = vec2(0.8 + sin(uTime * 0.5) * 0.08 + cos(uTime * 0.3) * 0.04, 1.2);
-    float sunDist = distance(vUv, sunPos);
-    
-    vec2 dir = vUv - sunPos;
-    float angle = atan(dir.y, dir.x);
-    
-    angle += sin(vUv.y * 12.0 - uTime * 0.8) * 0.05;
-    angle += cos(vUv.x * 8.0 + uTime * 0.5) * 0.03;
-    
-    float ray1 = sin(angle * 14.0 + uTime * 0.2) * 0.5 + 0.5;
-    float ray2 = sin(angle * 28.0 - uTime * 0.15) * 0.5 + 0.5;
-    float ray3 = sin(angle * 50.0 + uTime * 0.3) * 0.5 + 0.5;
-    
-    // 优化 pow(raysBase, 1.5) => raysBase * sqrt(raysBase)
-    float raysBase = ray1 * ray2 * ray3;
-    float rays = raysBase * sqrt(raysBase);
-    
-    float breath = sin(uTime * 1.5) * 0.1 + 0.9;
-    rays *= smoothstep(1.5, 0.0, sunDist) * breath;
-    rays *= smoothstep(0.0, 0.6, vUv.y);
-    
-    vec3 rayColor = vec3(0.3, 0.8, 1.0);
-    color += rayColor * rays * 1.2;
-    
-    float caustics = sin(vUv.x * 45.0 + uTime * 1.2) * sin(vUv.y * 25.0 - uTime * 0.8);
-    // 优化 pow(x, 4.0) => (x*x)*(x*x)
-    float c = caustics * 0.5 + 0.5;
-    float c2 = c * c;
-    caustics = c2 * c2; 
-    color += vec3(0.5, 0.9, 1.0) * caustics * smoothstep(0.6, 1.1, vUv.y) * 0.5;
-    
-    vec2 centerUv = vUv - 0.5;
-    float vignette = 1.0 - dot(centerUv, centerUv) * 1.8;
-    color *= smoothstep(0.0, 1.0, vignette);
-    
+    vec3 rayDir = normalize(vWorldPosition - uCameraPos);
+    float integratedNoise = 0.0;
+    vec3 uvRay = vec3(normalize(rayDir.xz) * 3.0, 0.0);
+    vec2 initialRayOffset = mix(rayDir.xz, uvRay.xy, 0.5);
+    vec3 samplePoint = vec3(uCameraPos.xz + initialRayOffset * 3.0, rayDir.y * 2.0);
+    float factor = 0.005;
+    samplePoint *= factor;
+    uvRay *= factor;
+
+    for (int i = 0; i < 5; i++) {
+      float layerNoise = triNoise3D(samplePoint, 0.2, uTime);
+      integratedNoise += layerNoise;
+      samplePoint += uvRay;
+    }
+
+    integratedNoise = (integratedNoise / 5.0) * 1.3;
+
+    float viewUp = rayDir.y * 0.5 + 0.5;
+    vec3 colorTop = vec3(0.05, 0.22, 0.52);
+    vec3 color = colorTop * viewUp * integratedNoise;
+
+    vec2 screenUv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
+    vec3 dither = (hash23(screenUv) - 0.5) * (1.0 / 255.0);
+    color += dither;
+
     gl_FragColor = vec4(color, 1.0);
   }
 `;
 
-export const particleVertexShader = `
-  attribute float speed;
-  attribute float offset;
-  attribute vec3 emitterPos;
-  varying float vOpacity;
-  varying float vShimmer;
-  varying float vLife;
+export const lightRayVertexShader = `
+  varying vec2 vUv;
+  varying float vDepth;
+  varying vec3 vWorldPosition;
+  varying float vSeed;
+
+  attribute float aSeed;
+
   uniform float uTime;
+  uniform vec3 uLightDir;
 
   void main() {
-    // 1. 生命周期计算
-    float life = mod(uTime * speed * 0.5 + offset, 1.0);
-    vLife = life;
+    vUv = uv;
 
-    // 2. 模拟合并逻辑：让部分粒子随着上升提前消失
-    // offset 决定了粒子的“存活阈值”，模拟被吞噬的过程
-    float survivalThreshold = 0.3 + 0.7 * offset; 
-    float isAlive = step(life, survivalThreshold);
-    
-    vec3 pos = position; 
-    pos.xz = emitterPos.xz;
-    
-    // 垂直位移：从深海向上高速移动
-    pos.y = mix(-70.0, 80.0, life); 
+    vec3 pos = position;
+    float beamDepth = 1.0 - uv.y;
+    float surfaceWave = sin(uTime * 0.08 + aSeed * 6.0) * 0.5 + 0.5;
+    float sway = sin(uTime * 0.03 + beamDepth * 2.6 + aSeed * 8.0) * 0.03;
+    pos.x += sway * (0.1 + beamDepth * 0.42);
+    pos.x += uLightDir.x * beamDepth * (6.5 + surfaceWave * 1.3);
+    pos.y += uLightDir.y * beamDepth * 4.8;
 
-    // 3. 动态扩散：由于合并，顶部的摆动更加从容
-    float drift = pow(life, 1.2) * 6.5; 
-    pos.x += sin(uTime * 2.0 + offset * 30.0) * drift;
-    pos.z += cos(uTime * 1.8 + offset * 25.0) * drift;
+    vec4 instancePosition = instanceMatrix * vec4(pos, 1.0);
+    vec4 worldPosition = modelMatrix * instancePosition;
+    vec4 mvPosition = modelViewMatrix * instancePosition;
 
-    vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-    
-    // 4. 进化增长逻辑：底部极细 (0.05)，顶部幸存者变得非常大 (10.0)
-    // 优化 pow(life, 3.5) => life^3 * sqrt(life)
-    float life3 = life * life * life;
-    float growth = mix(0.05, 10.0, life3 * sqrt(life)); 
-    
-    // 透明度：结合生命存续、边缘淡出
-    // isAlive 为 0 时粒子瞬间消失，模拟合并进了附近的大气泡
-    // 优化 pow(life, 5.0) => (life^4) * life
-    float life2 = life * life;
-    float life4 = life2 * life2;
-    vOpacity = isAlive * smoothstep(0.0, 0.05, life) * (1.0 - (life4 * life));
-    vShimmer = sin(uTime * 4.0 + offset * 15.0) * 0.5 + 0.5;
-
-    gl_PointSize = growth * (500.0 / -mvPosition.z);
+    vDepth = -mvPosition.z;
+    vWorldPosition = worldPosition.xyz;
+    vSeed = aSeed;
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
 
-export const particleFragmentShader = `
-  varying float vShimmer;
-  varying float vOpacity;
-  varying float vLife;
+export const lightRayFragmentShader = `
+  varying vec2 vUv;
+  varying float vDepth;
+  varying vec3 vWorldPosition;
+  varying float vSeed;
+
+  uniform float uTime;
+  uniform vec3 uCameraPos;
+  uniform float uFogNear;
+  uniform float uFogFar;
+  uniform vec3 uLightDir;
+  uniform float uBeamSpread;
+  uniform float uBeamSoftness;
+  uniform float uBeamIntensity;
+  uniform vec3 uBeamColor;
+
+  float hash11(float value) {
+    return fract(sin(value) * 43758.5453123);
+  }
 
   void main() {
-    // 丢弃圆形以外的像素
-    vec2 cxy = gl_PointCoord * 2.0 - 1.0;
-    float r = dot(cxy, cxy);
-    if (r > 1.0) discard;
-    
-    // --- 动态质感：越高越通透 ---
-    float rimPower = mix(1.2, 5.0, vLife);
-    float rim = pow(r, rimPower); 
-    
-    // 侧向折射高光
-    float glint = smoothstep(0.2, 0.0, length(cxy + vec2(0.35, 0.35)));
-    // 优化 pow(glint, 8.0) => ((g*g)*(g*g))*((g*g)*(g*g)) 的等价写法为 g2*g2*g2*g2
-    float g2 = glint * glint;
-    float g4 = g2 * g2;
-    glint = g4 * g4;
-    
-    // 内部微弱散射
-    float inner = (1.0 - r) * 0.1;
-    
-    vec3 baseColor = vec3(0.75, 0.92, 1.0);
-    vec3 finalColor = mix(baseColor, vec3(1.0), glint);
-    
-    // 综合透明度
-    float alpha = (rim * 0.9 + glint * 1.2 + inner) * vOpacity * (0.4 + vShimmer * 0.6);
-    
-    gl_FragColor = vec4(finalColor, alpha);
+    vec3 rayDir = normalize(vWorldPosition - uCameraPos);
+    float seed = hash11(vSeed);
+    float lightFacing = max(dot(normalize(-uLightDir), rayDir), 0.0);
+    float beamDepth = 1.0 - vUv.y;
+
+    float staticWarp = sin(beamDepth * 6.2 + seed * 6.28318) * 0.012;
+    float drift = sin(uTime * 0.05 + seed * 9.0) * 0.008;
+    float surfaceWaveA = sin(vWorldPosition.x * 0.08 + uTime * 0.12 + seed * 5.0);
+    float surfaceWaveB = sin(vWorldPosition.z * 0.07 - uTime * 0.1 + seed * 7.0);
+    float surfaceLens = (surfaceWaveA * 0.55 + surfaceWaveB * 0.45) * 0.018;
+    float shiftedCenter = (vUv.x - 0.5) + staticWarp * (0.06 + beamDepth * 0.16) + drift + surfaceLens * (0.18 + beamDepth * 0.46);
+    float spread = max(uBeamSpread, 0.001);
+    float softness = max(uBeamSoftness, 0.001);
+    float veil = exp(-pow(abs(shiftedCenter) * (0.9 / softness), 2.0));
+    float halo = exp(-pow(abs(shiftedCenter) * (1.6 / softness), 2.0));
+    float shaft = exp(-pow(abs(shiftedCenter) * (3.0 / spread), 2.0));
+    float core = exp(-pow(abs(shiftedCenter) * (5.2 / spread), 2.0));
+
+    float verticalFade = mix(0.48, 1.0, pow(max(vUv.y, 0.0), 0.78));
+    float entryGlow = smoothstep(0.78, 1.0, vUv.y);
+    float fogFade = 1.0 - smoothstep(uFogNear, uFogFar, vDepth);
+    float nearFade = smoothstep(2.0, 8.0, vDepth);
+    float angleFade = smoothstep(-0.35, 0.65, rayDir.y);
+    float waveShimmer = 0.92 + 0.1 * smoothstep(-0.3, 0.8, surfaceWaveA * 0.55 + surfaceWaveB * 0.45);
+    float sheetBreakup = 0.98 + sin(beamDepth * 6.0 + seed * 7.0) * 0.015;
+    float causticBlend = 0.84 + 0.16 * smoothstep(-0.1, 0.85, surfaceWaveA * 0.65 + surfaceWaveB * 0.35);
+
+    float density = veil * 0.36 + halo * 0.3 + shaft * 0.2 + core * 0.06;
+    float alpha = density * verticalFade * fogFade * nearFade * angleFade;
+    alpha *= (0.08 + entryGlow * 0.16 + lightFacing * 0.05) * waveShimmer * sheetBreakup * causticBlend * uBeamIntensity;
+
+    vec3 baseColor = uBeamColor * 0.28;
+    vec3 highlightColor = mix(uBeamColor, vec3(0.72, 0.84, 0.96), 0.1);
+    vec3 color = mix(baseColor, highlightColor, entryGlow * 0.22 + halo * 0.12 + core * 0.04 + lightFacing * 0.03);
+
+    gl_FragColor = vec4(color, alpha);
   }
 `;

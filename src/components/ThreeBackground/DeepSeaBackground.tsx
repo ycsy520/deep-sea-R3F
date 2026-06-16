@@ -1,88 +1,203 @@
-import { useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { useFrame, useThree } from '@react-three/fiber';
-import { bgVertexShader, bgFragmentShader, particleVertexShader, particleFragmentShader } from './shaders';
+import { useFrame } from '@react-three/fiber';
+import { bgVertexShader, bgFragmentShader, lightRayVertexShader, lightRayFragmentShader } from './shaders';
 
-type DeepSeaBackgroundProps = {
-  mobileCount?: number;
-  desktopCount?: number;
-  xOffsetRatio?: number; // 基于 viewport.width 的水平偏移系数，黄金分割线默认为 -0.118
+const MAIN_LIGHT_DIRECTION = new THREE.Vector3(0, -1.0, 0).normalize();
+
+/**
+ * 创建深海背景材质的 uniform 结构
+ * @returns 用于深海雾场 shader 的初始 uniform 集合
+ */
+function createBackgroundUniforms() {
+  return {
+    uTime: { value: 0 },
+    uCameraPos: { value: new THREE.Vector3() },
+    uResolution: { value: new THREE.Vector2(1, 1) },
+    uLightDir: { value: MAIN_LIGHT_DIRECTION.clone() },
+  };
+}
+
+/**
+ * 创建光线材质的 uniform 结构
+ * @param options 光线层的雾化、扩散和强度参数
+ * @returns 用于深海光线动画与雾衰减的初始 uniform 集合
+ */
+function createLightRayUniforms(options: LightRayUniformOptions) {
+  return {
+    uTime: { value: 0 },
+    uCameraPos: { value: new THREE.Vector3() },
+    uFogNear: { value: options.fogNear },
+    uFogFar: { value: options.fogFar },
+    uLightDir: { value: MAIN_LIGHT_DIRECTION.clone() },
+    uBeamSpread: { value: options.beamSpread },
+    uBeamSoftness: { value: options.beamSoftness },
+    uBeamIntensity: { value: options.beamIntensity },
+    uBeamColor: { value: new THREE.Color(options.beamColor) },
+  };
+}
+
+/**
+ * 创建确定性伪随机数生成器
+ * @param seed 固定种子
+ * @returns 返回 [0,1) 区间的随机数函数
+ */
+function createPRNG(seed: number) {
+  let x = seed | 0;
+  if (x === 0) x = 123456789;
+  return function rand() {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    return ((x >>> 0) & 0x7fffffff) / 0x80000000;
+  };
+}
+
+type LightRayLayout = {
+  position: THREE.Vector3;
+  rotationZ: number;
+  scale: THREE.Vector3;
 };
 
-const DeepSeaBackground = ({ mobileCount = 2500, desktopCount = 7000, xOffsetRatio = -0.118 }: DeepSeaBackgroundProps) => {
+type LightRayUniformOptions = {
+  fogNear: number;
+  fogFar: number;
+  beamSpread: number;
+  beamSoftness: number;
+  beamIntensity: number;
+  beamColor: THREE.ColorRepresentation;
+};
+
+/**
+ * 生成固定布局的深海光线实例数据
+ * @param count 光线数量
+ * @returns 光线位置、旋转与缩放数据
+ */
+function createLightRayLayouts(count: number) {
+  const random = createPRNG(20260303 ^ count);
+  const layouts: LightRayLayout[] = [];
+  const focalOffset = 0.0;
+
+  for (let i = 0; i < count; i++) {
+    const t = i / Math.max(count - 1, 1);
+    const cluster = (t - 0.5) * 22;
+    const x = focalOffset + cluster + (random() - 0.5) * 3.5;
+    const y = 26 + random() * 3.0;
+    const z = -24 + random() * 8.0;
+    const width = 4.8 + random() * 2.0;
+    const height = 70 + random() * 24.0;
+    const rotationZ = -0.018 + random() * 0.036;
+
+    layouts.push({
+      position: new THREE.Vector3(x, y, z),
+      rotationZ,
+      scale: new THREE.Vector3(width, height, 1),
+    });
+  }
+
+  return layouts;
+}
+
+/**
+ * 深海背景组件
+ * - 基于世界空间视线方向模拟深海雾场
+ * - 不再包含水泡粒子系统
+ */
+const DeepSeaBackground = () => {
   const bgMeshRef = useRef<THREE.Mesh>(null);
   const bgMatRef = useRef<THREE.ShaderMaterial>(null);
-  const pointsRef = useRef<THREE.Points>(null);
-  const pointsMatRef = useRef<THREE.ShaderMaterial>(null);
+  const lightRayHaloMeshRef = useRef<THREE.InstancedMesh>(null);
+  const lightRayHaloMatRef = useRef<THREE.ShaderMaterial>(null);
+  const lightRayCoreMeshRef = useRef<THREE.InstancedMesh>(null);
+  const lightRayCoreMatRef = useRef<THREE.ShaderMaterial>(null);
   const bgScaleCacheRef = useRef<{ aspect: number; z: number; fov: number } | null>(null);
-  
-  const { viewport } = useThree();
+  const bgUniforms = useMemo(() => createBackgroundUniforms(), []);
+  const lightRayHaloUniforms = useMemo(
+    () =>
+      createLightRayUniforms({
+        fogNear: 4,
+        fogFar: 48,
+        beamSpread: 7.8,
+        beamSoftness: 7.2,
+        beamIntensity: 0.12,
+        beamColor: '#4f86c8',
+      }),
+    [],
+  );
+  const lightRayCoreUniforms = useMemo(
+    () =>
+      createLightRayUniforms({
+        fogNear: 6,
+        fogFar: 42,
+        beamSpread: 3.8,
+        beamSoftness: 4.2,
+        beamIntensity: 0.015,
+        beamColor: '#9fc7ee',
+      }),
+    [],
+  );
+  const lightRayLayouts = useMemo(() => createLightRayLayouts(3), []);
+  const lightRayDummy = useMemo(() => new THREE.Object3D(), []);
 
-  // 检测移动端
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-  // 按照 test.tsx 的数量配置：移动端 2500，桌面端 7000
-  const bubbleCount = isMobile ? mobileCount : desktopCount;
-  
-  // 生成气泡数据 (GPU 粒子系统)
-  const { positions, emitterPos, speeds, offsets } = useMemo(() => {
-    const positions = new Float32Array(bubbleCount * 3);
-    const emitterPos = new Float32Array(bubbleCount * 3);
-    const speeds = new Float32Array(bubbleCount);
-    const offsets = new Float32Array(bubbleCount);
-    
-    // xorshift32：确定性随机（避免 Math.random，且比 sin 更轻量）
-    let x = (123456789 ^ bubbleCount) | 0;
-    if (x === 0) x = 123456789;
-    const seededRandom = () => {
-      x ^= x << 13;
-      x ^= x >>> 17;
-      x ^= x << 5;
-      return ((x >>> 0) & 0x7fffffff) / 0x80000000;
-    };
-
-    for (let i = 0; i < bubbleCount; i++) {
-      // 这里的 positions 数组即使全为0也可以，因为我们在 shader 中用 emitterPos 覆盖了
-      // 但 Three.js 必须检测到 position 属性才会启动渲染
-      positions[i * 3] = 0;
-      positions[i * 3 + 1] = 0;
-      positions[i * 3 + 2] = 0;
-
-      // 收紧喷口范围，制造强力气柱感
-      emitterPos[i * 3] = (seededRandom() - 0.5) * 4.0; 
-      emitterPos[i * 3 + 1] = -60;
-      emitterPos[i * 3 + 2] = (seededRandom() - 0.5) * 4.0;
-
-      speeds[i] = seededRandom() * 0.3 + 0.15; 
-      offsets[i] = seededRandom();
+  const lightRaySeeds = useMemo(() => {
+    const seeds = new Float32Array(lightRayLayouts.length);
+    for (let i = 0; i < lightRayLayouts.length; i++) {
+      // 避免使用 Math.random() 引发 react-hooks/purity 报错，
+      // 使用基于索引的确定性哈希公式来生成固定种子
+      seeds[i] = ((i * 1234.5678) % 100.0) + 1.0;
     }
-    
-    return { positions, emitterPos, speeds, offsets };
-  }, [bubbleCount]);
+    return seeds;
+  }, [lightRayLayouts.length]);
 
-  // 使用 useMemo 缓存 uniforms 初始结构
-  const bgUniforms = useMemo(() => ({
-    uTime: { value: 0 }
-  }), []);
+  /**
+   * 初始化光线实例矩阵与随机种子，保证布局稳定且不在渲染循环中重复计算
+   */
+  useLayoutEffect(() => {
+    const haloMesh = lightRayHaloMeshRef.current;
+    const coreMesh = lightRayCoreMeshRef.current;
+    if (!haloMesh || !coreMesh) return;
 
-  const particleUniforms = useMemo(() => ({
-    uTime: { value: 0 }
-  }), []);
+    for (let i = 0; i < lightRayLayouts.length; i++) {
+      const layout = lightRayLayouts[i];
+      lightRayDummy.position.copy(layout.position);
+      lightRayDummy.rotation.set(0, 0, layout.rotationZ);
+      lightRayDummy.scale.copy(layout.scale);
+      lightRayDummy.updateMatrix();
+      haloMesh.setMatrixAt(i, lightRayDummy.matrix);
+      coreMesh.setMatrixAt(i, lightRayDummy.matrix);
+    }
 
-  // 动画循环
-  useFrame(({ clock, camera }) => {
+    haloMesh.instanceMatrix.needsUpdate = true;
+    coreMesh.instanceMatrix.needsUpdate = true;
+
+    // 手动注入 aSeed，避免 JSX 解析报错
+    haloMesh.geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(lightRaySeeds, 1));
+    coreMesh.geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(lightRaySeeds, 1));
+  }, [lightRayDummy, lightRayLayouts, lightRaySeeds]);
+
+  /**
+   * 更新深海背景的时间、相机与尺寸相关 uniform
+   */
+  useFrame(({ clock, camera, size }) => {
     const time = clock.getElapsedTime();
-    
-    // 直接更新材质的 uniforms 属性，避免修改 React hook 依赖对象
+
     if (bgMatRef.current) {
       bgMatRef.current.uniforms.uTime.value = time;
+      bgMatRef.current.uniforms.uCameraPos.value.copy(camera.position);
+      bgMatRef.current.uniforms.uResolution.value.set(size.width, size.height);
     }
-    if (pointsMatRef.current) {
-      pointsMatRef.current.uniforms.uTime.value = time;
+
+    if (lightRayHaloMatRef.current) {
+      lightRayHaloMatRef.current.uniforms.uTime.value = time;
+      lightRayHaloMatRef.current.uniforms.uCameraPos.value.copy(camera.position);
     }
-    
-    // 自适应背景尺寸
+
+    if (lightRayCoreMatRef.current) {
+      lightRayCoreMatRef.current.uniforms.uTime.value = time;
+      lightRayCoreMatRef.current.uniforms.uCameraPos.value.copy(camera.position);
+    }
+
     if (bgMeshRef.current) {
-      // 计算 z=-80 处的视锥体尺寸
       const depth = 80;
       const z = camera.position.z;
       const fov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 75;
@@ -91,7 +206,7 @@ const DeepSeaBackground = ({ mobileCount = 2500, desktopCount = 7000, xOffsetRat
       const prev = bgScaleCacheRef.current;
       if (!prev || prev.aspect !== aspect || prev.z !== z || prev.fov !== fov) {
         const distance = z + depth;
-        const vFov = fov * Math.PI / 180;
+        const vFov = (fov * Math.PI) / 180;
         const height = 2 * Math.tan(vFov / 2) * distance;
         const width = height * aspect;
         bgMeshRef.current.scale.set(width, height, 1);
@@ -102,8 +217,7 @@ const DeepSeaBackground = ({ mobileCount = 2500, desktopCount = 7000, xOffsetRat
 
   return (
     <>
-      {/* 深海背景平面 */}
-      <mesh ref={bgMeshRef} position={[0, 0, -80]}>
+      <mesh ref={bgMeshRef} position={[0, 0, -80]} renderOrder={-20}>
         <planeGeometry args={[1, 1]} />
         <shaderMaterial
           ref={bgMatRef}
@@ -111,45 +225,57 @@ const DeepSeaBackground = ({ mobileCount = 2500, desktopCount = 7000, xOffsetRat
           fragmentShader={bgFragmentShader}
           uniforms={bgUniforms}
           depthWrite={false}
+          depthTest={false}
         />
       </mesh>
 
-      {/* 气泡粒子系统 (GPU) */}
-      {/* 
-        黄金分割线位置计算：
-        视口宽度 W，中心为 0
-        黄金分割点（左侧）距离左边缘 0.382W (1 - 1/1.618)
-        在中心坐标系下的位置 = 0.382W - 0.5W = -0.118W
-      */}
-      <points ref={pointsRef} position={[viewport.width * xOffsetRatio, 0, 0]}>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[positions, 3]}
-          />
-          <bufferAttribute
-            attach="attributes-emitterPos"
-            args={[emitterPos, 3]}
-          />
-          <bufferAttribute
-            attach="attributes-speed"
-            args={[speeds, 1]}
-          />
-          <bufferAttribute
-            attach="attributes-offset"
-            args={[offsets, 1]}
-          />
-        </bufferGeometry>
+      <instancedMesh
+        ref={lightRayHaloMeshRef}
+        args={[
+          undefined as unknown as THREE.BufferGeometry,
+          undefined as unknown as THREE.Material,
+          lightRayLayouts.length,
+        ]}
+        frustumCulled={false}
+        renderOrder={-11}
+      >
+        <planeGeometry args={[1, 1, 1, 12]} />
         <shaderMaterial
-          ref={pointsMatRef}
-          vertexShader={particleVertexShader}
-          fragmentShader={particleFragmentShader}
-          uniforms={particleUniforms}
-          transparent={true}
+          ref={lightRayHaloMatRef}
+          vertexShader={lightRayVertexShader}
+          fragmentShader={lightRayFragmentShader}
+          uniforms={lightRayHaloUniforms}
+          transparent
           blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
           depthWrite={false}
+          depthTest={false}
         />
-      </points>
+      </instancedMesh>
+
+      <instancedMesh
+        ref={lightRayCoreMeshRef}
+        args={[
+          undefined as unknown as THREE.BufferGeometry,
+          undefined as unknown as THREE.Material,
+          lightRayLayouts.length,
+        ]}
+        frustumCulled={false}
+        renderOrder={-10}
+      >
+        <planeGeometry args={[1, 1, 1, 12]} />
+        <shaderMaterial
+          ref={lightRayCoreMatRef}
+          vertexShader={lightRayVertexShader}
+          fragmentShader={lightRayFragmentShader}
+          uniforms={lightRayCoreUniforms}
+          transparent
+          blending={THREE.AdditiveBlending}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          depthTest={false}
+        />
+      </instancedMesh>
     </>
   );
 };

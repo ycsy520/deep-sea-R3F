@@ -1,6 +1,9 @@
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import DeepSeaBackground from './DeepSeaBackground';
 import Boids from './Boids';
 
@@ -103,6 +106,44 @@ const ResponsiveCamera = () => {
   return null;
 };
 
+/**
+ * 注入接近 aurelia 观感的后期链路，让光束和亮部边缘出现柔和扩散
+ */
+const ScenePostProcessing = () => {
+  const { gl, scene, camera, size } = useThree();
+  const composerRef = useRef<EffectComposer | null>(null);
+
+  useEffect(() => {
+    const composer = new EffectComposer(gl);
+    const renderPass = new RenderPass(scene, camera);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(size.width, size.height), 0.4, 0.8, 0.001);
+
+    bloomPass.threshold = 0.001;
+    bloomPass.strength = 0.4;
+    bloomPass.radius = 0.8;
+
+    composer.addPass(renderPass);
+    composer.addPass(bloomPass);
+    composer.setSize(size.width, size.height);
+    composerRef.current = composer;
+
+    return () => {
+      composer.dispose();
+      composerRef.current = null;
+    };
+  }, [camera, gl, scene, size.height, size.width]);
+
+  useEffect(() => {
+    composerRef.current?.setSize(size.width, size.height);
+  }, [size.height, size.width]);
+
+  useFrame(() => {
+    composerRef.current?.render();
+  }, 1);
+
+  return null;
+};
+
 const ThreeBackground = () => {
   const [isContextLost, setIsContextLost] = useState(false);
   const webgl2Supported = useMemo(() => canUseWebGL2(), []);
@@ -142,13 +183,18 @@ const ThreeBackground = () => {
         camera={{ position: [0, 0, 40], fov: 75, near: 1, far: 1000 }}
         dpr={[1, maxDpr]} // 支持高清屏且自适应上限
         gl={{ antialias: true, alpha: false }}
+        onCreated={({ gl }) => {
+          gl.toneMapping = THREE.ACESFilmicToneMapping;
+          gl.toneMappingExposure = 1.0;
+        }}
       >
         <WebGLContextEvents onLost={handleContextLost} onRestored={handleContextRestored} />
         <CameraRig />
         <ResponsiveCamera />
+        <ScenePostProcessing />
         
         
-        <fog attach="fog" args={[0x020813, 10, 80]} />
+        <fog attach="fog" args={[0x000000, 18, 120]} />
         
         {/* 内容组件 */}
         <DeepSeaBackground />
